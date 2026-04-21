@@ -4,6 +4,8 @@
   "description": "AI powered rental income tracker with lease analysis.",
   "main": "index.js",
   "scripts": {
+    "start": "node backend/server.js",
+    "dev": "nodemon backend/server.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
@@ -13,14 +15,8 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
   "bugs": {
     "url": "https://github.com/chrisbrito23/rental-tracker/issues"
   },
-  "homepage": "https://github.com/chrisbrito23/rental-tracker#readme",
-  "dependencies": {
-    "dotenv": "^17.4.2",
-    "express": "^5.2.1",
-    "pg": "^8.20.0"
-  }
+  "homepage": "https://github.com/chrisbrito23/rental-tracker#readme"
 }
