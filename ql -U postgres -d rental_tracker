@@ -1,0 +1,14 @@
+                               Table "public.properties"
+    Column     |            Type             | Collation | Nullable |      Default      
+---------------+-----------------------------+-----------+----------+-------------------
+ id            | uuid                        |           | not null | gen_random_uuid()
+ name          | character varying(255)      |           | not null | 
+ address       | text                        |           | not null | 
+ city          | character varying(100)      |           | not null | 
+ state         | character varying(50)       |           | not null | 
+ zip           | character varying(20)       |           | not null | 
+ property_type | character varying(50)       |           | not null | 
+ created_at    | timestamp without time zone |           |          | now()
+Indexes:
+    "properties_pkey" PRIMARY KEY, btree (id)
+
