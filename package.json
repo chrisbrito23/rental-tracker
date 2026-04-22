@@ -18,5 +18,13 @@
   "bugs": {
     "url": "https://github.com/chrisbrito23/rental-tracker/issues"
   },
-  "homepage": "https://github.com/chrisbrito23/rental-tracker#readme"
+  "homepage": "https://github.com/chrisbrito23/rental-tracker#readme",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.90.0",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "multer": "^2.1.1",
+    "pdf-parse": "^2.4.5",
+    "pg": "^8.20.0"
+  }
 }

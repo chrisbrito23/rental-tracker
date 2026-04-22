@@ -4,6 +4,7 @@ import Properties from './pages/Properties';
 import Tenants from './pages/Tenants';
 import Payments from './pages/Payments';
 import Invoices from './pages/Invoices';
+import Documents from './pages/Documents';
 import './App.css';
 
 function App() {
@@ -20,6 +21,7 @@ function App() {
           <NavLink to="/tenants" className={({isActive}) => isActive ? 'nav-item active' : 'nav-item'}>Tenants</NavLink>
           <NavLink to="/payments" className={({isActive}) => isActive ? 'nav-item active' : 'nav-item'}>Payments</NavLink>
           <NavLink to="/invoices" className={({isActive}) => isActive ? 'nav-item active' : 'nav-item'}>Invoices</NavLink>
+          <NavLink to="/documents" className={({isActive}) => isActive ? 'nav-item active' : 'nav-item'}>Documents</NavLink>
         </nav>
         <main className="main-content">
           <Routes>
@@ -28,6 +30,7 @@ function App() {
             <Route path="/tenants" element={<Tenants />} />
             <Route path="/payments" element={<Payments />} />
             <Route path="/invoices" element={<Invoices />} />
+            <Route path="/documents" element={<Documents />} />
           </Routes>
         </main>
       </div>

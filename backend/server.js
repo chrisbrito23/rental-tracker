@@ -12,6 +12,8 @@ const unitsRoutes = require('./routes/units');
 const paymentsRoutes = require('./routes/payments');
 const invoicesRoutes = require('./routes/invoices');
 const leasesRoutes = require('./routes/leases');
+const dashboardRoutes = require('./routes/dashboard');
+const aiRoutes = require('./routes/ai');
 
 app.use('/api/properties', propertiesRoutes);
 app.use('/api/tenants', tenantsRoutes);
@@ -19,6 +21,8 @@ app.use('/api/units', unitsRoutes);
 app.use('/api/payments', paymentsRoutes);
 app.use('/api/invoices', invoicesRoutes);
 app.use('/api/leases', leasesRoutes);
+app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/ai', aiRoutes);
 
 app.get('/health', (req, res) => {
   res.json({
