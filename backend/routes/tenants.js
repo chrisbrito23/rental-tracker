@@ -109,6 +109,54 @@ router.patch('/:id', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
+    await pool.query('UPDATE documents SET tenant_id = NULL WHERE tenant_id = $1', [id]);
+    await pool.query('UPDATE leases SET lease_status = $1 WHERE tenant_id = $2', ['inactive', id]);
+    await pool.query('DELETE FROM tenants WHERE id = $1', [id]);
+    res.json({ success: true, message: 'Tenant deleted — documents and lease history preserved' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, error: 'Server error' });
+  }
+});
+router.patch('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { first_name, last_name, email, phone, id_type, id_number, notes } = req.body;
+    const result = await pool.query(
+      `UPDATE tenants SET first_name=$1, last_name=$2, email=$3, phone=$4, id_type=$5, id_number=$6, notes=$7 WHERE id=$8 RETURNING *`,
+      [first_name, last_name, email, phone, id_type, id_number, notes, id]
+    );
+    res.json({ success: true, data: result.rows[0] });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, error: 'Server error' });
+  }
+});
+
+router.patch('/:id/move', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { property_id } = req.body;
+    const unit = await pool.query(
+      'SELECT u.id FROM units u JOIN leases l ON l.unit_id = u.id WHERE l.tenant_id = $1 AND l.lease_status = $2',
+      [id, 'active']
+    );
+    if (unit.rows.length > 0) {
+      await pool.query(
+        'UPDATE units SET property_id = $1 WHERE id = $2',
+        [property_id, unit.rows[0].id]
+      );
+    }
+    res.json({ success: true, message: 'Tenant moved successfully' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, error: 'Server error' });
+  }
+});
+
+router.delete('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
     await pool.query('DELETE FROM tenants WHERE id = $1', [id]);
     res.json({ success: true, message: 'Tenant deleted' });
   } catch (err) {
@@ -116,5 +164,4 @@ router.delete('/:id', async (req, res) => {
     res.status(500).json({ success: false, error: 'Server error' });
   }
 });
-
 module.exports = router;

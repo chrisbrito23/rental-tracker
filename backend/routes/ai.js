@@ -61,11 +61,118 @@ router.post('/analyze-lease', upload.single('lease'), async (req, res) => {
     const extractedData = JSON.parse(cleanJson);
     const confidence = (extractedData.confidence && extractedData.confidence.overall) || 95;
 
-    const savedDoc = await pool.query(
+  const savedDoc = await pool.query(
       'INSERT INTO documents (document_type, file_name, file_url, file_data, file_type, file_size, ai_extracted_data, ai_confidence, needs_review) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id',
       ['lease', req.file.originalname, 'stored_in_db', req.file.buffer, req.file.mimetype, req.file.size, JSON.stringify(extractedData), confidence, confidence < 95]
     );
 
+    const document_id = savedDoc.rows[0].id;
+    let populateResult = null;
+
+    if (confidence >= 95) {
+      try {
+        const nameParts = (extractedData.tenant_name || 'Unknown Tenant').split(' ');
+        const firstName = nameParts[0];
+        const lastName = nameParts.slice(1).join(' ') || 'Unknown';
+
+        const existingTenant = await pool.query(
+          'SELECT id FROM tenants WHERE first_name = $1 AND last_name = $2',
+          [firstName, lastName]
+        );
+
+        let tenant_id;
+        if (existingTenant.rows.length > 0) {
+          tenant_id = existingTenant.rows[0].id;
+        } else {
+          const newTenant = await pool.query(
+            'INSERT INTO tenants (first_name, last_name) VALUES ($1, $2) RETURNING id',
+            [firstName, lastName]
+          );
+          tenant_id = newTenant.rows[0].id;
+        }
+
+        let resolved_property_id = null;
+        if (extractedData.property_address) {
+          const addressMatch = await pool.query(
+            'SELECT id FROM properties WHERE address ILIKE $1 OR name ILIKE $1',
+            ['%' + extractedData.property_address.split(',')[0].trim() + '%']
+          );
+          if (addressMatch.rows.length > 0) {
+            resolved_property_id = addressMatch.rows[0].id;
+          }
+        }
+
+        let unit_id = null;
+        let lease_id = null;
+        let payments_generated = 0;
+
+        if (resolved_property_id) {
+          const unitNumber = extractedData.unit_number || 'Unit 1';
+          const existingUnit = await pool.query(
+            'SELECT id FROM units WHERE property_id = $1 AND unit_number = $2',
+            [resolved_property_id, unitNumber]
+          );
+
+          if (existingUnit.rows.length > 0) {
+            unit_id = existingUnit.rows[0].id;
+          } else {
+            const newUnit = await pool.query(
+              'INSERT INTO units (property_id, unit_number, rental_type, monthly_rent) VALUES ($1, $2, $3, $4) RETURNING id',
+              [resolved_property_id, unitNumber, 'room', extractedData.monthly_rent || 0]
+            );
+            unit_id = newUnit.rows[0].id;
+          }
+
+          const startDate = extractedData.start_date || new Date().toISOString().split('T')[0];
+          const newLease = await pool.query(
+            'INSERT INTO leases (unit_id, tenant_id, monthly_rent, security_deposit, start_date, end_date, late_fee_amount, late_fee_grace_days, rent_due_day, pet_allowed, pet_deposit, monthly_pet_fee) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id',
+            [unit_id, tenant_id, extractedData.monthly_rent || 0, extractedData.security_deposit || 0, startDate, extractedData.end_date || null, extractedData.late_fee_amount || 0, extractedData.late_fee_grace_days || 5, extractedData.rent_due_day || 1, extractedData.pet_allowed || false, extractedData.pet_deposit || 0, extractedData.monthly_pet_fee || 0]
+          );
+          lease_id = newLease.rows[0].id;
+
+          const dueDay = parseInt(extractedData.rent_due_day) || 1;
+          const monthlyRent = parseFloat(extractedData.monthly_rent) || 0;
+          const start = new Date(startDate);
+
+          for (let i = 0; i < 12; i++) {
+            const dueDate = new Date(start.getFullYear(), start.getMonth() + i, dueDay);
+            await pool.query(
+              'INSERT INTO payments (lease_id, amount, due_date, payment_date, status, payment_type) VALUES ($1, $2, $3, $4, $5, $6)',
+              [lease_id, monthlyRent, dueDate.toISOString().split('T')[0], dueDate.toISOString().split('T')[0], 'pending', 'rent']
+            );
+            payments_generated++;
+          }
+
+          await pool.query(
+            'UPDATE documents SET lease_id = $1, tenant_id = $2, ai_reviewed = true WHERE id = $3',
+            [lease_id, tenant_id, document_id]
+          );
+        }
+
+        populateResult = {
+          auto_populated: true,
+          tenant_id,
+          unit_id,
+          lease_id,
+          payments_generated
+        };
+      } catch (populateErr) {
+        console.error('Auto-populate error:', populateErr.message);
+        populateResult = { auto_populated: false, error: populateErr.message };
+      }
+    }
+
+    res.json({
+      success: true,
+      document_id,
+      data: extractedData,
+      confidence,
+      needs_review: confidence < 95,
+      file_saved: true,
+      file_name: req.file.originalname,
+      file_size: req.file.size,
+      auto_populated: populateResult
+    });
     res.json({
       success: true,
       document_id: savedDoc.rows[0].id,
@@ -114,14 +221,26 @@ router.post('/populate-from-document/:document_id', async (req, res) => {
       tenant_id = newTenant.rows[0].id;
     }
 
+    let resolved_property_id = property_id;
+    if (!resolved_property_id && data.property_address) {
+      const addressMatch = await pool.query(
+        'SELECT id FROM properties WHERE address ILIKE $1 OR name ILIKE $1',
+        ['%' + data.property_address.split(',')[0].trim() + '%']
+      );
+      if (addressMatch.rows.length > 0) {
+        resolved_property_id = addressMatch.rows[0].id;
+      }
+    }
+
     let unit_id = null;
     let lease_id = null;
+    let payments_generated = 0;
 
-    if (property_id) {
+    if (resolved_property_id) {
       const unitNumber = data.unit_number || 'Unit 1';
       const existingUnit = await pool.query(
         'SELECT id FROM units WHERE property_id = $1 AND unit_number = $2',
-        [property_id, unitNumber]
+        [resolved_property_id, unitNumber]
       );
 
       if (existingUnit.rows.length > 0) {
@@ -129,16 +248,30 @@ router.post('/populate-from-document/:document_id', async (req, res) => {
       } else {
         const newUnit = await pool.query(
           'INSERT INTO units (property_id, unit_number, rental_type, monthly_rent) VALUES ($1, $2, $3, $4) RETURNING id',
-          [property_id, unitNumber, 'room', data.monthly_rent || 0]
+          [resolved_property_id, unitNumber, 'room', data.monthly_rent || 0]
         );
         unit_id = newUnit.rows[0].id;
       }
 
+      const startDate = data.start_date || new Date().toISOString().split('T')[0];
       const newLease = await pool.query(
         'INSERT INTO leases (unit_id, tenant_id, monthly_rent, security_deposit, start_date, end_date, late_fee_amount, late_fee_grace_days, rent_due_day, pet_allowed, pet_deposit, monthly_pet_fee) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id',
-        [unit_id, tenant_id, data.monthly_rent || 0, data.security_deposit || 0, data.start_date || new Date().toISOString().split('T')[0], data.end_date || null, data.late_fee_amount || 0, data.late_fee_grace_days || 5, data.rent_due_day || 1, data.pet_allowed || false, data.pet_deposit || 0, data.monthly_pet_fee || 0]
+        [unit_id, tenant_id, data.monthly_rent || 0, data.security_deposit || 0, startDate, data.end_date || null, data.late_fee_amount || 0, data.late_fee_grace_days || 5, data.rent_due_day || 1, data.pet_allowed || false, data.pet_deposit || 0, data.monthly_pet_fee || 0]
       );
       lease_id = newLease.rows[0].id;
+
+      const dueDay = parseInt(data.rent_due_day) || 1;
+      const monthlyRent = parseFloat(data.monthly_rent) || 0;
+      const start = new Date(startDate);
+
+      for (let i = 0; i < 12; i++) {
+        const dueDate = new Date(start.getFullYear(), start.getMonth() + i, dueDay);
+        await pool.query(
+          'INSERT INTO payments (lease_id, amount, due_date, payment_date, status, payment_type) VALUES ($1, $2, $3, $4, $5, $6)',
+          [lease_id, monthlyRent, dueDate.toISOString().split('T')[0], dueDate.toISOString().split('T')[0], 'pending', 'rent']
+        );
+        payments_generated++;
+      }
     }
 
     await pool.query(
@@ -151,7 +284,8 @@ router.post('/populate-from-document/:document_id', async (req, res) => {
       message: 'Dashboard populated successfully',
       tenant_id,
       unit_id,
-      lease_id
+      lease_id,
+      payments_generated
     });
 
   } catch (err) {
@@ -162,7 +296,10 @@ router.post('/populate-from-document/:document_id', async (req, res) => {
 
 router.get('/retrieve/:document_id', async (req, res) => {
   try {
-    const result = await pool.query('SELECT file_data, file_name, file_type FROM documents WHERE id = $1', [req.params.document_id]);
+    const result = await pool.query(
+      'SELECT file_data, file_name, file_type FROM documents WHERE id = $1',
+      [req.params.document_id]
+    );
     if (result.rows.length === 0) {
       return res.status(404).json({ success: false, error: 'Document not found' });
     }

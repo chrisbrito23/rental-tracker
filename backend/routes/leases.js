@@ -24,6 +24,7 @@ router.get('/', async (req, res) => {
 router.get('/tenant-summary/:tenant_id', async (req, res) => {
   try {
     const { tenant_id } = req.params;
+
     const lease = await pool.query(`
       SELECT l.*,
         t.first_name || ' ' || t.last_name as tenant_name,
@@ -33,7 +34,7 @@ router.get('/tenant-summary/:tenant_id', async (req, res) => {
       JOIN units u ON u.id = l.unit_id
       JOIN properties p ON p.id = u.property_id
       WHERE l.tenant_id = $1
-      AND l.lease_status = 'active'
+     AND (l.lease_status = 'active' OR l.lease_status IS NULL)
       LIMIT 1
     `, [tenant_id]);
 
@@ -54,6 +55,7 @@ router.get('/tenant-summary/:tenant_id', async (req, res) => {
         COUNT(CASE WHEN status = 'paid' AND payment_date <= due_date THEN 1 END) as on_time,
         COUNT(CASE WHEN status = 'late' THEN 1 END) as late_count,
         SUM(CASE WHEN status = 'paid' THEN amount ELSE 0 END) as total_paid,
+        SUM(CASE WHEN status != 'paid' THEN amount ELSE 0 END) as total_unpaid,
         SUM(late_fee_applied) as total_late_fees
       FROM payments
       WHERE lease_id = $1
@@ -64,6 +66,13 @@ router.get('/tenant-summary/:tenant_id', async (req, res) => {
     const score = totalDue > 0 ? Math.round((onTime / totalDue) * 100) : 100;
 
     const today = new Date();
+    const leaseStart = new Date(lease.rows[0].start_date);
+    const monthsElapsed = Math.max(0, (today.getFullYear() - leaseStart.getFullYear()) * 12 + (today.getMonth() - leaseStart.getMonth()));
+    const monthlyRent = parseFloat(lease.rows[0].monthly_rent) || 0;
+    const totalExpected = monthsElapsed * monthlyRent;
+    const totalPaid = parseFloat(stats.rows[0].total_paid) || 0;
+    const totalOwed = Math.max(0, totalExpected - totalPaid);
+
     const dueDay = lease.rows[0].rent_due_day || 1;
     const graceDays = lease.rows[0].late_fee_grace_days || 5;
     const dueDate = new Date(today.getFullYear(), today.getMonth(), dueDay);
@@ -79,6 +88,10 @@ router.get('/tenant-summary/:tenant_id', async (req, res) => {
         payments: payments.rows,
         stats: stats.rows[0],
         score,
+        total_owed: totalOwed,
+        total_expected: totalExpected,
+        total_paid: totalPaid,
+        months_elapsed: monthsElapsed,
         is_late: isLate,
         late_fee_applicable: lateFeeApplicable,
         due_date: dueDate.toISOString().split('T')[0],
