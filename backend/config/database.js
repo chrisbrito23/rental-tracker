@@ -7,14 +7,13 @@ const pool = new Pool({
   database: process.env.DB_NAME,
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
-});
-
-pool.on('connect', () => {
-  console.log('Connected to PostgreSQL database');
+  max: 10,
 });
 
 pool.on('error', (err) => {
   console.error('Database error:', err);
 });
+
+console.log('Database pool ready');
 
 module.exports = pool;

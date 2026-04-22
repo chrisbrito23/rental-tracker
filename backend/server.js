@@ -11,26 +11,19 @@ const tenantsRoutes = require('./routes/tenants');
 const unitsRoutes = require('./routes/units');
 const paymentsRoutes = require('./routes/payments');
 const invoicesRoutes = require('./routes/invoices');
+const leasesRoutes = require('./routes/leases');
 
 app.use('/api/properties', propertiesRoutes);
 app.use('/api/tenants', tenantsRoutes);
 app.use('/api/units', unitsRoutes);
 app.use('/api/payments', paymentsRoutes);
 app.use('/api/invoices', invoicesRoutes);
+app.use('/api/leases', leasesRoutes);
 
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
-    message: 'Rental tracker API is running',
-    endpoints: [
-      'GET/POST /api/properties',
-      'GET/POST /api/tenants',
-      'GET/POST /api/units',
-      'GET/POST /api/payments',
-      'GET /api/payments/summary',
-      'GET/POST /api/invoices',
-      'GET /api/invoices/unpaid'
-    ]
+    message: 'Rental tracker API is running'
   });
 });
 

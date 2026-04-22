@@ -5,18 +5,38 @@ const pool = require('../config/database');
 router.get('/', async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT u.*,
-        p.name as property_name,
+      SELECT p.*,
         t.first_name || ' ' || t.last_name as tenant_name,
-        l.monthly_rent, l.lease_status, l.end_date,
-        l.pet_allowed, l.monthly_pet_fee
-      FROM units u
-      LEFT JOIN properties p ON p.id = u.property_id
-      LEFT JOIN leases l ON l.unit_id = u.id AND l.lease_status = 'active'
-      LEFT JOIN tenants t ON t.id = l.tenant_id
-      ORDER BY p.name, u.unit_number
+        u.unit_number, u.rental_type,
+        pr.name as property_name
+      FROM payments p
+      JOIN leases l ON l.id = p.lease_id
+      JOIN tenants t ON t.id = l.tenant_id
+      JOIN units u ON u.id = l.unit_id
+      JOIN properties pr ON pr.id = u.property_id
+      ORDER BY p.payment_date DESC
     `);
     res.json({ success: true, count: result.rows.length, data: result.rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, error: 'Server error' });
+  }
+});
+
+router.get('/summary', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        SUM(CASE WHEN status = 'paid' THEN amount ELSE 0 END) as total_collected,
+        SUM(CASE WHEN status = 'late' THEN amount ELSE 0 END) as total_late,
+        SUM(late_fee_applied) as total_late_fees,
+        COUNT(CASE WHEN status = 'paid' THEN 1 END) as paid_count,
+        COUNT(CASE WHEN status = 'late' THEN 1 END) as late_count,
+        COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending_count
+      FROM payments
+      WHERE DATE_TRUNC('month', payment_date) = DATE_TRUNC('month', CURRENT_DATE)
+    `);
+    res.json({ success: true, data: result.rows[0] });
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, error: 'Server error' });
@@ -26,56 +46,18 @@ router.get('/', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     const {
-      property_id, unit_number, rental_type,
-      floor_number, bedrooms, bathrooms,
-      square_feet, monthly_rent
+      lease_id, amount, payment_date,
+      due_date, payment_method, payment_type,
+      status, late_fee_applied, notes
     } = req.body;
     const result = await pool.query(
-      `INSERT INTO units
-        (property_id, unit_number, rental_type, floor_number, bedrooms, bathrooms, square_feet, monthly_rent)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `INSERT INTO payments
+        (lease_id, amount, payment_date, due_date, payment_method, payment_type, status, late_fee_applied, notes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING *`,
-      [property_id, unit_number, rental_type, floor_number, bedrooms, bathrooms, square_feet, monthly_rent]
+      [lease_id, amount, payment_date, due_date, payment_method, payment_type, status, late_fee_applied, notes]
     );
     res.status(201).json({ success: true, data: result.rows[0] });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ success: false, error: 'Server error' });
-  }
-});
-
-router.patch('/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const {
-      unit_number, rental_type, floor_number,
-      bedrooms, bathrooms, square_feet,
-      monthly_rent, is_occupied
-    } = req.body;
-    const result = await pool.query(
-      `UPDATE units SET
-        unit_number=$1, rental_type=$2, floor_number=$3,
-        bedrooms=$4, bathrooms=$5, square_feet=$6,
-        monthly_rent=$7, is_occupied=$8
-       WHERE id=$9
-       RETURNING *`,
-      [unit_number, rental_type, floor_number, bedrooms, bathrooms, square_feet, monthly_rent, is_occupied, id]
-    );
-    if (result.rows.length === 0) {
-      return res.status(404).json({ success: false, error: 'Unit not found' });
-    }
-    res.json({ success: true, data: result.rows[0] });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ success: false, error: 'Server error' });
-  }
-});
-
-router.delete('/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    await pool.query('DELETE FROM units WHERE id = $1', [id]);
-    res.json({ success: true, message: 'Unit deleted' });
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, error: 'Server error' });
