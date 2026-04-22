@@ -14,6 +14,7 @@ const invoicesRoutes = require('./routes/invoices');
 const leasesRoutes = require('./routes/leases');
 const dashboardRoutes = require('./routes/dashboard');
 const aiRoutes = require('./routes/ai');
+const documentsRoutes = require('./routes/documents');
 
 app.use('/api/properties', propertiesRoutes);
 app.use('/api/tenants', tenantsRoutes);
@@ -23,12 +24,10 @@ app.use('/api/invoices', invoicesRoutes);
 app.use('/api/leases', leasesRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/ai', aiRoutes);
+app.use('/api/documents', documentsRoutes);
 
 app.get('/health', (req, res) => {
-  res.json({
-    status: 'ok',
-    message: 'Rental tracker API is running'
-  });
+  res.json({ status: 'ok', message: 'Rental tracker API is running' });
 });
 
 app.listen(PORT, () => {
