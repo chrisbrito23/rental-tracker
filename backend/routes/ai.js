@@ -311,5 +311,63 @@ router.get('/retrieve/:document_id', async (req, res) => {
     res.status(500).json({ success: false, error: 'Failed to retrieve file' });
   }
 });
+router.post('/analyze-expense', upload.single('bill'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: 'No file uploaded' });
+    }
 
+    const fileName = req.file.originalname.toLowerCase();
+    const isPDF = req.file.mimetype === 'application/pdf' || fileName.endsWith('.pdf');
+    const isWord = fileName.endsWith('.doc') || fileName.endsWith('.docx');
+
+    const EXPENSE_PROMPT = 'You are a financial document analyzer. Extract expense information from this document and return ONLY a valid JSON object: { "amount": 0.00, "expense_date": "YYYY-MM-DD", "category": "mortgage|utilities|insurance|repairs|maintenance|taxes|other", "description": "brief description", "vendor": "company name", "is_recurring": false, "tax_deductible": true, "confidence": { "overall": 95, "amount": 99, "date": 99 }, "notes": "any important details" }';
+
+    let message;
+    if (isPDF) {
+      const base64PDF = req.file.buffer.toString('base64');
+      message = await anthropic.messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1024,
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64PDF } },
+            { type: 'text', text: EXPENSE_PROMPT }
+          ]
+        }]
+      });
+    } else if (isWord) {
+      const result = await mammoth.extractRawText({ buffer: req.file.buffer });
+      message = await anthropic.messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1024,
+        messages: [{ role: 'user', content: EXPENSE_PROMPT + '\n\nDocument:\n' + result.value }]
+      });
+    } else {
+      const textContent = req.file.buffer.toString('utf8');
+      message = await anthropic.messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1024,
+        messages: [{ role: 'user', content: EXPENSE_PROMPT + '\n\nDocument:\n' + textContent }]
+      });
+    }
+
+    const responseText = message.content[0].text;
+    const cleanJson = responseText.replace(/```json|```/g, '').trim();
+    const extractedData = JSON.parse(cleanJson);
+    const confidence = (extractedData.confidence && extractedData.confidence.overall) || 95;
+
+    res.json({
+      success: true,
+      data: extractedData,
+      confidence,
+      needs_review: confidence < 95
+    });
+
+  } catch (err) {
+    console.error('Expense AI error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 module.exports = router;

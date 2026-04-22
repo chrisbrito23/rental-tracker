@@ -15,6 +15,7 @@ const leasesRoutes = require('./routes/leases');
 const dashboardRoutes = require('./routes/dashboard');
 const aiRoutes = require('./routes/ai');
 const documentsRoutes = require('./routes/documents');
+const expensesRoutes = require('./routes/expenses');
 
 app.use('/api/properties', propertiesRoutes);
 app.use('/api/tenants', tenantsRoutes);
@@ -25,6 +26,7 @@ app.use('/api/leases', leasesRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/documents', documentsRoutes);
+app.use('/api/expenses', expensesRoutes);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', message: 'Rental tracker API is running' });
