@@ -19,8 +19,6 @@ router.post('/analyze-lease', upload.single('lease'), async (req, res) => {
     const fileName = req.file.originalname.toLowerCase();
     const isPDF = req.file.mimetype === 'application/pdf' || fileName.endsWith('.pdf');
     const isWord = fileName.endsWith('.doc') || fileName.endsWith('.docx');
-    const isText = fileName.endsWith('.txt');
-
     let message;
 
     if (isPDF) {
@@ -38,16 +36,15 @@ router.post('/analyze-lease', upload.single('lease'), async (req, res) => {
       });
     } else if (isWord) {
       const result = await mammoth.extractRawText({ buffer: req.file.buffer });
-      const textContent = result.value;
       message = await anthropic.messages.create({
         model: 'claude-sonnet-4-6',
         max_tokens: 1024,
         messages: [{
           role: 'user',
-          content: PROMPT + '\n\nLease document:\n' + textContent
+          content: PROMPT + '\n\nLease document:\n' + result.value
         }]
       });
-    } else if (isText) {
+    } else {
       const textContent = req.file.buffer.toString('utf8');
       message = await anthropic.messages.create({
         model: 'claude-sonnet-4-6',
@@ -57,8 +54,6 @@ router.post('/analyze-lease', upload.single('lease'), async (req, res) => {
           content: PROMPT + '\n\nLease document:\n' + textContent
         }]
       });
-    } else {
-      return res.status(400).json({ success: false, error: 'Unsupported file type. Use PDF, Word, or text files.' });
     }
 
     const responseText = message.content[0].text;
@@ -84,6 +79,83 @@ router.post('/analyze-lease', upload.single('lease'), async (req, res) => {
 
   } catch (err) {
     console.error('AI error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+router.post('/populate-from-document/:document_id', async (req, res) => {
+  try {
+    const { document_id } = req.params;
+    const { property_id, confirmed_data } = req.body;
+
+    const doc = await pool.query('SELECT * FROM documents WHERE id = $1', [document_id]);
+    if (doc.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Document not found' });
+    }
+
+    const data = confirmed_data || doc.rows[0].ai_extracted_data;
+    const nameParts = (data.tenant_name || 'Unknown Tenant').split(' ');
+    const firstName = nameParts[0];
+    const lastName = nameParts.slice(1).join(' ') || 'Unknown';
+
+    const existingTenant = await pool.query(
+      'SELECT id FROM tenants WHERE first_name = $1 AND last_name = $2',
+      [firstName, lastName]
+    );
+
+    let tenant_id;
+    if (existingTenant.rows.length > 0) {
+      tenant_id = existingTenant.rows[0].id;
+    } else {
+      const newTenant = await pool.query(
+        'INSERT INTO tenants (first_name, last_name) VALUES ($1, $2) RETURNING id',
+        [firstName, lastName]
+      );
+      tenant_id = newTenant.rows[0].id;
+    }
+
+    let unit_id = null;
+    let lease_id = null;
+
+    if (property_id) {
+      const unitNumber = data.unit_number || 'Unit 1';
+      const existingUnit = await pool.query(
+        'SELECT id FROM units WHERE property_id = $1 AND unit_number = $2',
+        [property_id, unitNumber]
+      );
+
+      if (existingUnit.rows.length > 0) {
+        unit_id = existingUnit.rows[0].id;
+      } else {
+        const newUnit = await pool.query(
+          'INSERT INTO units (property_id, unit_number, rental_type, monthly_rent) VALUES ($1, $2, $3, $4) RETURNING id',
+          [property_id, unitNumber, 'room', data.monthly_rent || 0]
+        );
+        unit_id = newUnit.rows[0].id;
+      }
+
+      const newLease = await pool.query(
+        'INSERT INTO leases (unit_id, tenant_id, monthly_rent, security_deposit, start_date, end_date, late_fee_amount, late_fee_grace_days, rent_due_day, pet_allowed, pet_deposit, monthly_pet_fee) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id',
+        [unit_id, tenant_id, data.monthly_rent || 0, data.security_deposit || 0, data.start_date || new Date().toISOString().split('T')[0], data.end_date || null, data.late_fee_amount || 0, data.late_fee_grace_days || 5, data.rent_due_day || 1, data.pet_allowed || false, data.pet_deposit || 0, data.monthly_pet_fee || 0]
+      );
+      lease_id = newLease.rows[0].id;
+    }
+
+    await pool.query(
+      'UPDATE documents SET lease_id = $1, tenant_id = $2, ai_reviewed = true WHERE id = $3',
+      [lease_id, tenant_id, document_id]
+    );
+
+    res.json({
+      success: true,
+      message: 'Dashboard populated successfully',
+      tenant_id,
+      unit_id,
+      lease_id
+    });
+
+  } catch (err) {
+    console.error('Populate error:', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });
